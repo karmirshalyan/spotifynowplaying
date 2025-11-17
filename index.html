@@ -132,36 +132,18 @@ const scopes = [
     'streaming'
 ];
 
-// Запрос авторизации
-function requestSpotifyToken() {
-    const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=token&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scopes.join(' '))}`;
-    window.location.href = authUrl;
-}
-
-// Получаем access token из URL
+// --- TOKEN HANDLING ---
 function getAccessToken() {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
     return params.get('access_token');
 }
 
-// Проверяем наличие токена и, если его нет, выполняем редирект для авторизации
-function checkToken() {
-    let token = getAccessToken();
-    
-    // Если токен не найден, запускаем процесс авторизации
-    if (!token) {
-        requestSpotifyToken();
-    } else {
-        console.log('Access Token:', token);
-        // Можно продолжить работу с API, передав token
-    }
+function refreshToken() {
+    const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=token&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scopes.join(' '))}`;
+    window.location.href = authUrl;
 }
 
-// Проверяем наличие токена при загрузке страницы
-window.onload = checkToken;
-
-    
 // --- TRACK + LYRICS ---
 let currentAlbum = '';
 let lyrics = [];
@@ -307,6 +289,7 @@ setInterval(updateLyrics, 500);
 </script>
 </body>
 </html>
+
 
 
 
