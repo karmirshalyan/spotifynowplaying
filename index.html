@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spotify Now Playing Redesigned</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        font-family: 'Nunito', sans-serif;
+        overflow: hidden;
+        background: #000;
+        color: white;
+        min-height: 100vh; 
+        display: flex; 
+        align-items: center;
+        justify-content: center;
+        position: relative; 
+    }
+
+    /* --- BLURRED BACKGROUND ARTWORK --- */
+    #blur-bg {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background-size: cover;
+        background-position: center;
+        filter: blur(40px) brightness(0.4);
+        z-index: -1;
+        transform: scale(1.2);
+        transition: background-image 0.5s ease;
+    }
+
+    /* --- CENTERED VINYL DISC --- */
+    #vinyl-container {
+        position: relative; 
+        width: min(500px, 90vmin);
+        height: min(500px, 90vmin);
+        border-radius: 50%;
+        background: radial-gradient(#111 0%, #000 60%, #000 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        z-index: 2;
+    }
+
+    #albumImage {
+        width: 84%;
+        height: 84%;
+        border-radius: 50%;
+        object-fit: cover;
+        transition: opacity 0.4s ease;
+    }
+
+    /* VINYL ROTATION */
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
+    .spinning {
+        animation: spin 12s linear infinite;
+    }
+
+    .paused {
+        animation-play-state: paused;
+    }
+
+    /* SONG TITLE + ARTIST BOTTOM CENTER */
+    #song-info {
+        position: absolute;
+        bottom: 40px;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        font-size: 28px;
+        font-weight: 700;
+        z-index: 3;
+        width: 90%;
+        max-width: 600px;
+        word-wrap: break-word;
+    }
+
+    #artistName {
+        font-size: 20px;
+        opacity: 0.7;
+        margin-top: 4px;
+    }
+
+    /* --- RANDOM LYRIC TEXT ON BACKGROUND --- */
+    .lyric-floating {
+        position: absolute;
+        font-size: 22px;
+        opacity: 0;
+        white-space: nowrap;
+        pointer-events: none;
+        color: #fff;
+        text-shadow: 0 0 5px #fff;
+        z-index: 1;
+        transition: all 1s ease;
+    }
+
+    .lyric-active {
+        opacity: 1 !important;
+        transform: scale(1.3);
+        text-shadow: 0 0 25px #fff;
+    }
+</style>
+</head>
+<body>
+
+<div id="blur-bg"></div>
+
+<div id="vinyl-container">
+    <img id="albumImage" src="" />
+</div>
+
+<div id="song-info">
+    <div id="trackName">Track</div>
+    <div id="artistName">Artist</div>
+</div>
+
+<script>const client_id = 'd982deeadc1c4e14938ddf6f4219b467';
+const redirect_uri = 'https://karmirshalyan.github.io/spotifynowplaying';
+const scopes = [
+    'user-read-currently-playing',
+    'user-read-playback-state',
+    'streaming'
+];
+
+// Запрос авторизации
+function requestSpotifyToken() {
+    const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=token&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scopes.join(' '))}`;
+    window.location.href = authUrl;
+}
+
+// Получаем access token из URL
+function getAccessToken() {
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+    return params.get('access_token');
+}
+
+// Проверяем наличие токена и, если его нет, выполняем редирект для авторизации
+function checkToken() {
+    let token = getAccessToken();
+    
+    // Если токен не найден, запускаем процесс авторизации
+    if (!token) {
+        requestSpotifyToken();
+    } else {
+        console.log('Access Token:', token);
+        // Можно продолжить работу с API, передав token
+    }
+}
+
+// Проверяем наличие токена при загрузке страницы
+window.onload = checkToken;
+
+    
+// --- TRACK + LYRICS ---
+let currentAlbum = '';
+let lyrics = [];
+let playbackStartTime = 0;
+let duration = 0;
+let isPaused = false;
+
+// --- CLEAR OLD LYRICS ---
+function clearLyrics() {
+    const old = document.querySelectorAll('.lyric-floating');
+    old.forEach(el => el.remove());
+}
+
+// --- LYRIC SCATTERING ---
+function scatterLyrics() {
+    clearLyrics();
+
+    lyrics.forEach((line, index) => {
+        const span = document.createElement("div");
+        span.className = "lyric-floating";
+        span.id = `lyric-${index}`;
+        span.textContent = line.text;
+
+        // Расположение текста вокруг круга
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        let x, y;
+        do {
+            x = Math.random() * screenWidth;
+            y = Math.random() * screenHeight;
+            const dx = x - screenWidth/2;
+            const dy = y - screenHeight/2;
+            var distance = Math.sqrt(dx*dx + dy*dy);
+        } while(distance < 180); // Радиус круга + отступ
+
+        span.style.left = x + "px";
+        span.style.top = y + "px";
+        span.style.opacity = 0;
+
+        document.body.appendChild(span);
+
+        // Плавное появление
+        setTimeout(() => {
+            span.style.opacity = 0.12;
+        }, 100 * index);
+    });
+}
+
+// --- HIGHLIGHT CURRENT LYRIC ---
+function highlightLyric(currentIndex) {
+    document.querySelectorAll('.lyric-floating').forEach(el => el.classList.remove('lyric-active'));
+    const active = document.getElementById(`lyric-${currentIndex}`);
+    if(active) active.classList.add('lyric-active');
+}
+
+// --- PARSE LRC ---
+function parseLRC(lrc) {
+    const lines = lrc.split("\n");
+    return lines.map(line => {
+        const t = line.match(/\[(\d{2}):(\d{2}\.\d{2})]/);
+        if(!t) return null;
+        return {
+            time: parseInt(t[1])*60 + parseFloat(t[2]),
+            text: line.replace(/\[.*?]/g,'').trim()
+        };
+    }).filter(x => x);
+}
+
+// --- UPDATE LYRICS ---
+function updateLyrics() {
+    if(!lyrics.length) return;
+    const now = (Date.now() - playbackStartTime)/1000;
+    const idx = lyrics.findIndex(l => l.time > now) - 1;
+    if(idx >= 0) highlightLyric(idx);
+}
+
+// --- FETCH CURRENT SONG ---
+function fetchSong(token) {
+    fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+        headers: { 'Authorization': 'Bearer ' + token }
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(!data || !data.item) return;
+
+        const track = data.item;
+        duration = track.duration_ms / 1000;
+        playbackStartTime = Date.now() - data.progress_ms;
+        isPaused = !data.is_playing;
+
+        document.getElementById('trackName').textContent = track.name;
+        document.getElementById('artistName').textContent = track.artists.map(a=>a.name).join(', ');
+
+        const cover = track.album.images[0].url;
+        if(cover !== currentAlbum) {
+            currentAlbum = cover;
+            // Сброс фоновых лирик при смене песни
+            clearLyrics();
+            const albumImg = document.getElementById('albumImage');
+            albumImg.style.opacity = 0;
+            setTimeout(() => {
+                albumImg.src = cover;
+                albumImg.style.opacity = 1;
+                document.getElementById('blur-bg').style.backgroundImage = `url(${cover})`;
+            }, 300);
+        }
+
+        updateRotation();
+        fetchLyrics(track.name, track.artists[0].name, track.album.name, duration);
+    })
+}
+
+// --- UPDATE ROTATION ---
+function updateRotation() {
+    const vinyl = document.getElementById('vinyl-container');
+    if(!isPaused){
+        vinyl.classList.add('spinning');
+        vinyl.classList.remove('paused');
+    } else {
+        vinyl.classList.add('paused');
+    }
+}
+
+// --- FETCH LYRICS ---
+function fetchLyrics(track, artist, album, duration){
+    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
+    fetch(url)
+    .then(r=>r.json())
+    .then(data=>{
+        if(!data.syncedLyrics) return;
+        lyrics = parseLRC(data.syncedLyrics);
+        scatterLyrics();
+    })
+    .catch(e=>console.log(e));
+}
+
+// --- INIT ---
+let token = getAccessToken();
+if(!token) refreshToken();
+
+setInterval(()=>fetchSong(token), 1500);
+setInterval(updateLyrics, 500);
+</script>
+</body>
+</html>
+
+
+
+
