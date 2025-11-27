@@ -33,7 +33,6 @@
         transition: background-image 0.5s ease;
     }
 
-
     #vinyl-container {
         position: relative; 
         width: min(500px, 90vmin);
@@ -55,7 +54,6 @@
         transition: opacity 0.4s ease;
     }
 
-
     @keyframes spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -68,6 +66,7 @@
     .paused {
         animation-play-state: paused;
     }
+    
     #song-info {
         position: absolute;
         bottom: 40px;
@@ -119,6 +118,7 @@
     <div id="trackName">Track</div>
     <div id="artistName">Artist</div>
 </div>
+
 <script>
 const client_id = "ca2b2a8fbe6c4adf9357b81a525ca490";
 const redirect_uri = "https://karmirshalyan.github.io/spotifynowplaying/";
@@ -246,26 +246,41 @@ async function getValidToken() {
     return token;
 }
 
-// ===================== PLAYER =====================
-async function initPlayer() {
-    token = await getValidToken();
-    setInterval(() => fetchSong(token), 1500);
-    setInterval(updateLyrics, 500);
+// ===================== LYRICS PARSING =====================
+function parseLRC(lrcText) {
+    const lines = lrcText.split('\n');
+    const result = [];
+    const timeRegex = /\[(\d+):(\d+).(\d+)\]/g;
+    
+    for (const line of lines) {
+        const matches = [...line.matchAll(timeRegex)];
+        if (matches.length) {
+            const text = line.replace(timeRegex, '').trim();
+            if (text) {
+                for (const match of matches) {
+                    const minutes = parseFloat(match[1]);
+                    const seconds = parseFloat(match[2]);
+                    const hundredths = parseFloat(match[3]);
+                    const time = minutes * 60 + seconds + hundredths / 100;
+                    result.push({ time, text });
+                }
+            }
+        }
+    }
+    result.sort((a, b) => a.time - b.time);
+    return result;
 }
-
-initPlayer();
 
 // ===================== LYRICS FUNCTIONS =====================
 function clearLyrics() {
     const old = document.querySelectorAll('.lyric-floating');
     old.forEach(el => el.remove());
-    lyrics = [];
 }
 
 function scatterLyrics() {
     clearLyrics();
 
-    if (!lyrics.length) return; // если текста нет, ничего не делаем
+    if (!lyrics.length) return;
 
     lyrics.forEach((line, index) => {
         const span = document.createElement("div");
@@ -294,38 +309,84 @@ function scatterLyrics() {
     });
 }
 
-function fetchLyrics(track, artist, album, duration){
-    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
-    fetch(url)
-    .then(r => r.json())
-    .then(data => {
-        lyrics = [];        // очищаем старый текст
-        clearLyrics();      // очищаем старые блоки
-        if(data && data.syncedLyrics) {
-            lyrics = parseLRC(data.syncedLyrics);
-        }
-        scatterLyrics();    // вызываем всегда, даже если текста нет
-    })
-    .catch(e => {
-        lyrics = [];
-        clearLyrics();
-        scatterLyrics();    // на случай ошибки
-        console.log(e);
+function highlightLyric(index) {
+    // Remove active class from all lyrics
+    document.querySelectorAll('.lyric-floating').forEach(el => {
+        el.classList.remove('lyric-active');
     });
+    
+    // Add active class to current lyric
+    const currentEl = document.getElementById(`lyric-${index}`);
+    if (currentEl) {
+        currentEl.classList.add('lyric-active');
+    }
 }
 
 function updateLyrics() {
-    if(!lyrics.length) return;
-    const now = (Date.now() - playbackStartTime)/1000;
-    const idx = lyrics.findIndex(l => l.time > now) - 1;
-    if(idx >= 0) highlightLyric(idx);
+    if (!lyrics.length || isPaused) return;
+    
+    const now = (Date.now() - playbackStartTime) / 1000;
+    let currentIndex = -1;
+    
+    // Find the current lyric based on time
+    for (let i = 0; i < lyrics.length; i++) {
+        if (lyrics[i].time > now) {
+            break;
+        }
+        currentIndex = i;
+    }
+    
+    if (currentIndex >= 0) {
+        highlightLyric(currentIndex);
+    }
 }
+
+function fetchLyrics(track, artist, album, duration) {
+    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
+    
+    fetch(url)
+    .then(r => {
+        if (!r.ok) throw new Error('Lyrics not found');
+        return r.json();
+    })
+    .then(data => {
+        if (data && data.syncedLyrics) {
+            lyrics = parseLRC(data.syncedLyrics);
+            scatterLyrics();
+        } else {
+            lyrics = [];
+            clearLyrics();
+        }
+    })
+    .catch(e => {
+        console.log('Lyrics error:', e);
+        lyrics = [];
+        clearLyrics();
+    });
+}
+
+// ===================== PLAYER =====================
+async function initPlayer() {
+    token = await getValidToken();
+    setInterval(() => fetchSong(token), 1500);
+    setInterval(updateLyrics, 500);
+}
+
+initPlayer();
 
 function fetchSong(token) {
     fetch('https://api.spotify.com/v1/me/player/currently-playing', {
         headers: { 'Authorization': 'Bearer ' + token }
     })
-    .then(res => res.json())
+    .then(res => {
+        if (res.status === 204) {
+            // No content - no song playing
+            clearLyrics();
+            lastTrackId = "";
+            return null;
+        }
+        return res.json();
+    })
     .then(data => {
         if(!data || !data.item) {
             clearLyrics();
@@ -338,16 +399,19 @@ function fetchSong(token) {
         // Если трек сменился
         if(track.id !== lastTrackId) {
             lastTrackId = track.id;
-            clearLyrics(); // очищаем старые блоки
-            lyrics = [];   // очищаем массив текста
+            lyrics = [];
+            clearLyrics();
+            
+            document.getElementById('trackName').textContent = track.name;
+            document.getElementById('artistName').textContent = track.artists.map(a => a.name).join(', ');
+            
+            // Fetch lyrics for new track
+            fetchLyrics(track.name, track.artists[0].name, track.album.name, track.duration_ms / 1000);
         }
 
         duration = track.duration_ms / 1000;
         playbackStartTime = Date.now() - data.progress_ms;
         isPaused = !data.is_playing;
-
-        document.getElementById('trackName').textContent = track.name;
-        document.getElementById('artistName').textContent = track.artists.map(a => a.name).join(', ');
 
         const cover = track.album.images[0].url;
         if(cover !== currentAlbum) {
@@ -362,31 +426,9 @@ function fetchSong(token) {
         }
 
         updateRotation();
-        fetchLyrics(track.name, track.artists[0].name, track.album.name, duration);
     })
-    .catch(e => console.log(e));
+    .catch(e => console.log('Fetch song error:', e));
 }
-
-function fetchLyrics(track, artist, album, duration){
-    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
-    fetch(url)
-    .then(r => r.json())
-    .then(data => {
-        clearLyrics(); 
-        if(data && data.syncedLyrics) {
-            lyrics = parseLRC(data.syncedLyrics);
-            scatterLyrics(); 
-        } else {
-            lyrics = []; 
-        }
-    })
-    .catch(e => {
-        clearLyrics();
-        lyrics = [];
-        console.log(e);
-    });
-}
-
 
 // ===================== ROTATION =====================
 function updateRotation() {
@@ -402,13 +444,3 @@ function updateRotation() {
 
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
