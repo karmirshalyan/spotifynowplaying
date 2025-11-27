@@ -119,21 +119,20 @@
     <div id="trackName">Track</div>
     <div id="artistName">Artist</div>
 </div>
-
 <script>
-// =====================
-// SPOTIFY PKCE AUTH
-// =====================
 const client_id = "ca2b2a8fbe6c4adf9357b81a525ca490";
 const redirect_uri = "https://karmirshalyan.github.io/spotifynowplaying/";
+const scopes = ["user-read-currently-playing", "user-read-playback-state", "streaming"];
 
-const scopes = [
-    "user-read-currently-playing",
-    "user-read-playback-state",
-    "streaming"
-];
+let token = null;
+let currentAlbum = '';
+let lyrics = [];
+let playbackStartTime = 0;
+let duration = 0;
+let isPaused = false;
+let lastTrackId = ""; 
 
-
+// ===================== AUTH FUNCTIONS =====================
 function generateRandomString(length) {
     let text = "";
     const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -142,7 +141,6 @@ function generateRandomString(length) {
     }
     return text;
 }
-
 
 async function sha256(plain) {
     const encoder = new TextEncoder();
@@ -160,7 +158,6 @@ function loadVerifier() { return localStorage.getItem("code_verifier"); }
 async function startAuth() {
     const codeVerifier = generateRandomString(64);
     saveVerifier(codeVerifier);
-
     const codeChallenge = await sha256(codeVerifier);
 
     const authUrl =
@@ -177,7 +174,6 @@ async function startAuth() {
 
 async function requestAccessToken(code) {
     const code_verifier = loadVerifier();
-
     const body = new URLSearchParams({
         client_id,
         grant_type: "authorization_code",
@@ -195,7 +191,6 @@ async function requestAccessToken(code) {
     return await res.json();
 }
 
-
 async function refreshToken(refresh_token) {
     const body = new URLSearchParams({
         client_id,
@@ -212,12 +207,10 @@ async function refreshToken(refresh_token) {
     return await res.json();
 }
 
-
 async function handleAuth() {
     const params = new URLSearchParams(window.location.search);
 
     if (params.get("code")) {
-        // exchange code for token
         const code = params.get("code");
         const tokenData = await requestAccessToken(code);
 
@@ -246,15 +239,14 @@ async function getValidToken() {
     if (test.status === 401 && refresh_token) {
         const newTok = await refreshToken(refresh_token);
         localStorage.setItem("access_token", newTok.access_token);
-        if (newTok.refresh_token)
-            localStorage.setItem("refresh_token", newTok.refresh_token);
+        if (newTok.refresh_token) localStorage.setItem("refresh_token", newTok.refresh_token);
         return newTok.access_token;
     }
 
     return token;
 }
-let token = null;
 
+// ===================== PLAYER =====================
 async function initPlayer() {
     token = await getValidToken();
     setInterval(() => fetchSong(token), 1500);
@@ -263,18 +255,66 @@ async function initPlayer() {
 
 initPlayer();
 
+// ===================== LYRICS FUNCTIONS =====================
+function clearLyrics() {
+    const old = document.querySelectorAll('.lyric-floating');
+    old.forEach(el => el.remove());
+    lyrics = [];
+}
 
+function scatterLyrics() {
+    clearLyrics();
 
-let currentAlbum = '';
-let lyrics = [];
-let playbackStartTime = 0;
-let duration = 0;
-let isPaused = false;
-let lastTrackId = ""; 
+    lyrics.forEach((line, index) => {
+        const span = document.createElement("div");
+        span.className = "lyric-floating";
+        span.id = `lyric-${index}`;
+        span.textContent = line.text;
 
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        let x, y;
+        do {
+            x = Math.random() * screenWidth;
+            y = Math.random() * screenHeight;
+            const dx = x - screenWidth/2;
+            const dy = y - screenHeight/2;
+            var distance = Math.sqrt(dx*dx + dy*dy);
+        } while(distance < 180);
 
-let lastTrackId = "";
+        span.style.left = x + "px";
+        span.style.top = y + "px";
+        span.style.opacity = 0;
 
+        document.body.appendChild(span);
+
+        setTimeout(() => { span.style.opacity = 0.12; }, 100 * index);
+    });
+}
+
+function highlightLyric(currentIndex) {
+    document.querySelectorAll('.lyric-floating').forEach(el => el.classList.remove('lyric-active'));
+    const active = document.getElementById(`lyric-${currentIndex}`);
+    if(active) active.classList.add('lyric-active');
+}
+
+function parseLRC(lrc) {
+    const lines = lrc.split("\n");
+    return lines.map(line => {
+        const t = line.match(/\[(\d{2}):(\d{2}\.\d{2})]/);
+        if(!t) return null;
+        return { time: parseInt(t[1])*60 + parseFloat(t[2]), text: line.replace(/\[.*?]/g,'').trim() };
+    }).filter(x => x);
+}
+
+function updateLyrics() {
+    if(!lyrics.length) return;
+    const now = (Date.now() - playbackStartTime)/1000;
+    const idx = lyrics.findIndex(l => l.time > now) - 1;
+    if(idx >= 0) highlightLyric(idx);
+}
+
+// ===================== FETCH SONG & LYRICS =====================
 function fetchSong(token) {
     fetch('https://api.spotify.com/v1/me/player/currently-playing', {
         headers: { 'Authorization': 'Bearer ' + token }
@@ -283,7 +323,6 @@ function fetchSong(token) {
     .then(data => {
         if(!data || !data.item) {
             clearLyrics();
-            lyrics = [];
             lastTrackId = "";
             return;
         }
@@ -293,7 +332,6 @@ function fetchSong(token) {
         if(track.id !== lastTrackId) {
             lastTrackId = track.id;
             clearLyrics();
-            lyrics = []; 
         }
 
         duration = track.duration_ms / 1000;
@@ -316,115 +354,30 @@ function fetchSong(token) {
         }
 
         updateRotation();
-
         fetchLyrics(track.name, track.artists[0].name, track.album.name, duration);
     })
     .catch(e => console.log(e));
 }
 
-function clearLyrics() {
-    const old = document.querySelectorAll('.lyric-floating');
-    old.forEach(el => el.remove());
-}
-
-function scatterLyrics() {
-    clearLyrics();
-
-    lyrics.forEach((line, index) => {
-        const span = document.createElement("div");
-        span.className = "lyric-floating";
-        span.id = `lyric-${index}`;
-        span.textContent = line.text;
-
-
-        const screenWidth = window.innerWidth;
-        const screenHeight = window.innerHeight;
-        let x, y;
-        do {
-            x = Math.random() * screenWidth;
-            y = Math.random() * screenHeight;
-            const dx = x - screenWidth/2;
-            const dy = y - screenHeight/2;
-            var distance = Math.sqrt(dx*dx + dy*dy);
-        } while(distance < 180); 
-
-        span.style.left = x + "px";
-        span.style.top = y + "px";
-        span.style.opacity = 0;
-
-        document.body.appendChild(span);
-
-
-        setTimeout(() => {
-            span.style.opacity = 0.12;
-        }, 100 * index);
+function fetchLyrics(track, artist, album, duration){
+    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
+    fetch(url)
+    .then(r => r.json())
+    .then(data => {
+        lyrics = [];
+        if(data && data.syncedLyrics) {
+            lyrics = parseLRC(data.syncedLyrics);
+        }
+        scatterLyrics();
+    })
+    .catch(e => {
+        lyrics = [];
+        scatterLyrics();
+        console.log(e);
     });
 }
 
-
-function highlightLyric(currentIndex) {
-    document.querySelectorAll('.lyric-floating').forEach(el => el.classList.remove('lyric-active'));
-    const active = document.getElementById(`lyric-${currentIndex}`);
-    if(active) active.classList.add('lyric-active');
-}
-
-
-function parseLRC(lrc) {
-    const lines = lrc.split("\n");
-    return lines.map(line => {
-        const t = line.match(/\[(\d{2}):(\d{2}\.\d{2})]/);
-        if(!t) return null;
-        return {
-            time: parseInt(t[1])*60 + parseFloat(t[2]),
-            text: line.replace(/\[.*?]/g,'').trim()
-        };
-    }).filter(x => x);
-}
-
-
-function updateLyrics() {
-    if(!lyrics.length) return;
-    const now = (Date.now() - playbackStartTime)/1000;
-    const idx = lyrics.findIndex(l => l.time > now) - 1;
-    if(idx >= 0) highlightLyric(idx);
-}
-
-
-function fetchSong(token) {
-    fetch('https://api.spotify.com/v1/me/player/currently-playing', {
-        headers: { 'Authorization': 'Bearer ' + token }
-    })
-    .then(res => res.json())
-    .then(data => {
-        if(!data || !data.item) return;
-
-        const track = data.item;
-        duration = track.duration_ms / 1000;
-        playbackStartTime = Date.now() - data.progress_ms;
-        isPaused = !data.is_playing;
-
-        document.getElementById('trackName').textContent = track.name;
-        document.getElementById('artistName').textContent = track.artists.map(a=>a.name).join(', ');
-
-        const cover = track.album.images[0].url;
-        if(cover !== currentAlbum) {
-            currentAlbum = cover;
-            clearLyrics();
-            const albumImg = document.getElementById('albumImage');
-            albumImg.style.opacity = 0;
-            setTimeout(() => {
-                albumImg.src = cover;
-                albumImg.style.opacity = 1;
-                document.getElementById('blur-bg').style.backgroundImage = `url(${cover})`;
-            }, 300);
-        }
-
-        updateRotation();
-
-        fetchLyrics(track.name, track.artists[0].name, track.album.name, duration);
-    })
-}
-
+// ===================== ROTATION =====================
 function updateRotation() {
     const vinyl = document.getElementById('vinyl-container');
     if(!isPaused){
@@ -434,30 +387,11 @@ function updateRotation() {
         vinyl.classList.add('paused');
     }
 }
-function fetchLyrics(track, artist, album, duration){
-    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
-    fetch(url)
-    .then(r => r.json())
-    .then(data => {
-        lyrics = []; 
-        if(data && data.syncedLyrics) {
-            lyrics = parseLRC(data.syncedLyrics);
-        }
-        scatterLyrics(); 
-    })
-    .catch(e => {
-        lyrics = [];
-        scatterLyrics(); 
-        console.log(e);
-    });
-}
-
-
-setInterval(()=>fetchSong(token), 1500);
-setInterval(updateLyrics, 500);
 </script>
+
 </body>
 </html>
+
 
 
 
