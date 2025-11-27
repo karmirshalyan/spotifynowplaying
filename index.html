@@ -265,6 +265,8 @@ function clearLyrics() {
 function scatterLyrics() {
     clearLyrics();
 
+    if (!lyrics.length) return; // если текста нет, ничего не делаем
+
     lyrics.forEach((line, index) => {
         const span = document.createElement("div");
         span.className = "lyric-floating";
@@ -292,19 +294,24 @@ function scatterLyrics() {
     });
 }
 
-function highlightLyric(currentIndex) {
-    document.querySelectorAll('.lyric-floating').forEach(el => el.classList.remove('lyric-active'));
-    const active = document.getElementById(`lyric-${currentIndex}`);
-    if(active) active.classList.add('lyric-active');
-}
-
-function parseLRC(lrc) {
-    const lines = lrc.split("\n");
-    return lines.map(line => {
-        const t = line.match(/\[(\d{2}):(\d{2}\.\d{2})]/);
-        if(!t) return null;
-        return { time: parseInt(t[1])*60 + parseFloat(t[2]), text: line.replace(/\[.*?]/g,'').trim() };
-    }).filter(x => x);
+function fetchLyrics(track, artist, album, duration){
+    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
+    fetch(url)
+    .then(r => r.json())
+    .then(data => {
+        lyrics = [];        // очищаем старый текст
+        clearLyrics();      // очищаем старые блоки
+        if(data && data.syncedLyrics) {
+            lyrics = parseLRC(data.syncedLyrics);
+        }
+        scatterLyrics();    // вызываем всегда, даже если текста нет
+    })
+    .catch(e => {
+        lyrics = [];
+        clearLyrics();
+        scatterLyrics();    // на случай ошибки
+        console.log(e);
+    });
 }
 
 function updateLyrics() {
@@ -395,6 +402,7 @@ function updateRotation() {
 
 </body>
 </html>
+
 
 
 
