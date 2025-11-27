@@ -314,7 +314,6 @@ function updateLyrics() {
     if(idx >= 0) highlightLyric(idx);
 }
 
-// ===================== FETCH SONG & LYRICS =====================
 function fetchSong(token) {
     fetch('https://api.spotify.com/v1/me/player/currently-playing', {
         headers: { 'Authorization': 'Bearer ' + token }
@@ -329,9 +328,11 @@ function fetchSong(token) {
 
         const track = data.item;
 
+        // Если трек сменился
         if(track.id !== lastTrackId) {
             lastTrackId = track.id;
-            clearLyrics();
+            clearLyrics(); // очищаем старые блоки
+            lyrics = [];   // очищаем массив текста
         }
 
         duration = track.duration_ms / 1000;
@@ -364,18 +365,21 @@ function fetchLyrics(track, artist, album, duration){
     fetch(url)
     .then(r => r.json())
     .then(data => {
-        lyrics = [];
+        clearLyrics(); 
         if(data && data.syncedLyrics) {
             lyrics = parseLRC(data.syncedLyrics);
+            scatterLyrics(); 
+        } else {
+            lyrics = []; 
         }
-        scatterLyrics();
     })
     .catch(e => {
+        clearLyrics();
         lyrics = [];
-        scatterLyrics();
         console.log(e);
     });
 }
+
 
 // ===================== ROTATION =====================
 function updateRotation() {
@@ -391,6 +395,7 @@ function updateRotation() {
 
 </body>
 </html>
+
 
 
 
