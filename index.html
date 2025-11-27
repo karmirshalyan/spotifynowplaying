@@ -124,25 +124,152 @@
 </div>
 
 <script>
-const client_id = 'ca2b2a8fbe6c4adf9357b81a525ca490'; // Replace with your Spotify client ID
-const redirect_uri = 'https://karmirshalyan.github.io/spotifynowplaying/'; // Redirect URI after authorization
+// =====================
+// SPOTIFY PKCE AUTH
+// =====================
+const client_id = "ca2b2a8fbe6c4adf9357b81a525ca490";
+const redirect_uri = "https://karmirshalyan.github.io/spotifynowplaying/";
+
 const scopes = [
-    'user-read-currently-playing',
-    'user-read-playback-state',
-    'streaming'
+    "user-read-currently-playing",
+    "user-read-playback-state",
+    "streaming"
 ];
 
-// --- TOKEN HANDLING ---
-function getAccessToken() {
-    const hash = window.location.hash.substring(1);
-    const params = new URLSearchParams(hash);
-    return params.get('access_token');
+// --- GENERATE RANDOM STRING ---
+function generateRandomString(length) {
+    let text = "";
+    const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (let i = 0; i < length; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }
 
-function refreshToken() {
-    const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=token&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scopes.join(' '))}`;
-    window.location.href = authUrl;
+// --- SHA256 FOR PKCE ---
+async function sha256(plain) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(plain);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
 }
+
+// --- SAVE + LOAD CODE VERIFIER ---
+function saveVerifier(v) { localStorage.setItem("code_verifier", v); }
+function loadVerifier() { return localStorage.getItem("code_verifier"); }
+
+// --- START AUTH FLOW ---
+async function startAuth() {
+    const codeVerifier = generateRandomString(64);
+    saveVerifier(codeVerifier);
+
+    const codeChallenge = await sha256(codeVerifier);
+
+    const authUrl =
+        "https://accounts.spotify.com/authorize" +
+        `?client_id=${client_id}` +
+        `&response_type=code` +
+        `&redirect_uri=${encodeURIComponent(redirect_uri)}` +
+        `&scope=${encodeURIComponent(scopes.join(" "))}` +
+        `&code_challenge_method=S256` +
+        `&code_challenge=${codeChallenge}`;
+
+    window.location = authUrl;
+}
+
+// --- EXCHANGE CODE FOR TOKEN ---
+async function requestAccessToken(code) {
+    const code_verifier = loadVerifier();
+
+    const body = new URLSearchParams({
+        client_id,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri,
+        code_verifier
+    });
+
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+    });
+
+    return await res.json();
+}
+
+// --- REFRESH TOKEN ---
+async function refreshToken(refresh_token) {
+    const body = new URLSearchParams({
+        client_id,
+        grant_type: "refresh_token",
+        refresh_token
+    });
+
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+    });
+
+    return await res.json();
+}
+
+// --- MAIN TOKEN HANDLING ---
+async function handleAuth() {
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("code")) {
+        // exchange code for token
+        const code = params.get("code");
+        const tokenData = await requestAccessToken(code);
+
+        localStorage.setItem("access_token", tokenData.access_token);
+        localStorage.setItem("refresh_token", tokenData.refresh_token);
+        window.history.replaceState({}, document.title, redirect_uri);
+        return tokenData.access_token;
+    }
+
+    const stored = localStorage.getItem("access_token");
+    if (stored) return stored;
+
+    startAuth();
+}
+
+async function getValidToken() {
+    let token = localStorage.getItem("access_token");
+    const refresh_token = localStorage.getItem("refresh_token");
+
+    if (!token) return handleAuth();
+
+    // test if token expired
+    const test = await fetch("https://api.spotify.com/v1/me", {
+        headers: { Authorization: "Bearer " + token }
+    });
+
+    if (test.status === 401 && refresh_token) {
+        const newTok = await refreshToken(refresh_token);
+        localStorage.setItem("access_token", newTok.access_token);
+        if (newTok.refresh_token)
+            localStorage.setItem("refresh_token", newTok.refresh_token);
+        return newTok.access_token;
+    }
+
+    return token;
+}
+let token = null;
+
+async function initPlayer() {
+    token = await getValidToken();
+    setInterval(() => fetchSong(token), 1500);
+    setInterval(updateLyrics, 500);
+}
+
+initPlayer();
+
 
 // --- TRACK + LYRICS ---
 let currentAlbum = '';
@@ -280,12 +407,10 @@ function fetchLyrics(track, artist, album, duration){
     .catch(e=>console.log(e));
 }
 
-// --- INIT ---
-let token = getAccessToken();
-if(!token) refreshToken();
 
 setInterval(()=>fetchSong(token), 1500);
 setInterval(updateLyrics, 500);
 </script>
 </body>
 </html>
+
