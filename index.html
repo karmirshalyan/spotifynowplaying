@@ -13,7 +13,7 @@
         background: #000;
         color: white;
         min-height: 100vh; 
-        display: flex;
+        display: flex; 
         align-items: center;
         justify-content: center;
         position: relative; 
@@ -32,6 +32,7 @@
         transform: scale(1.2);
         transition: background-image 0.5s ease;
     }
+
 
     #vinyl-container {
         position: relative; 
@@ -54,6 +55,7 @@
         transition: opacity 0.4s ease;
     }
 
+
     @keyframes spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -66,7 +68,6 @@
     .paused {
         animation-play-state: paused;
     }
-    
     #song-info {
         position: absolute;
         bottom: 40px;
@@ -118,38 +119,139 @@
     <div id="trackName">Track</div>
     <div id="artistName">Artist</div>
 </div>
-
 <script>
 const client_id = "ca2b2a8fbe6c4adf9357b81a525ca490";
 const redirect_uri = "https://karmirshalyan.github.io/spotifynowplaying/";
 const scopes = ["user-read-currently-playing", "user-read-playback-state", "streaming"];
 
+let token = null;
 let currentAlbum = '';
 let lyrics = [];
 let playbackStartTime = 0;
 let duration = 0;
 let isPaused = false;
-let lastTrackId = "";
+let lastTrackId = ""; 
 
-// --- TOKEN HANDLING ---
-function getAccessToken() {
-    const hash = window.location.hash.substring(1);
-    const params = new URLSearchParams(hash);
-    return params.get('access_token');
+// ===================== AUTH FUNCTIONS =====================
+function generateRandomString(length) {
+    let text = "";
+    const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (let i = 0; i < length; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }
 
-function redirectToAuth() {
-    const authUrl = `https://accounts.spotify.com/authorize?client_id=${client_id}&response_type=token&redirect_uri=${encodeURIComponent(redirect_uri)}&scope=${encodeURIComponent(scopes.join(' '))}`;
-    window.location.href = authUrl;
+async function sha256(plain) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(plain);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
 }
 
-// --- CLEAR OLD LYRICS ---
+function saveVerifier(v) { localStorage.setItem("code_verifier", v); }
+function loadVerifier() { return localStorage.getItem("code_verifier"); }
+
+async function startAuth() {
+    const codeVerifier = generateRandomString(64);
+    saveVerifier(codeVerifier);
+    const codeChallenge = await sha256(codeVerifier);
+
+    const authUrl =
+        "https://accounts.spotify.com/authorize" +
+        `?client_id=${client_id}` +
+        `&response_type=code` +
+        `&redirect_uri=${encodeURIComponent(redirect_uri)}` +
+        `&scope=${encodeURIComponent(scopes.join(" "))}` +
+        `&code_challenge_method=S256` +
+        `&code_challenge=${codeChallenge}`;
+
+    window.location = authUrl;
+}
+
+async function requestAccessToken(code) {
+    const code_verifier = loadVerifier();
+    const body = new URLSearchParams({
+        client_id,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri,
+        code_verifier
+    });
+
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+    });
+
+    return await res.json();
+}
+
+async function refreshToken(refresh_token) {
+    const body = new URLSearchParams({
+        client_id,
+        grant_type: "refresh_token",
+        refresh_token
+    });
+
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+    });
+
+    return await res.json();
+}
+
+async function handleAuth() {
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("code")) {
+        const code = params.get("code");
+        const tokenData = await requestAccessToken(code);
+
+        localStorage.setItem("access_token", tokenData.access_token);
+        localStorage.setItem("refresh_token", tokenData.refresh_token);
+        window.history.replaceState({}, document.title, redirect_uri);
+        return tokenData.access_token;
+    }
+
+    const stored = localStorage.getItem("access_token");
+    if (stored) return stored;
+
+    startAuth();
+}
+
+async function getValidToken() {
+    let token = localStorage.getItem("access_token");
+    const refresh_token = localStorage.getItem("refresh_token");
+
+    if (!token) return handleAuth();
+
+    const test = await fetch("https://api.spotify.com/v1/me", {
+        headers: { Authorization: "Bearer " + token }
+    });
+
+    if (test.status === 401 && refresh_token) {
+        const newTok = await refreshToken(refresh_token);
+        localStorage.setItem("access_token", newTok.access_token);
+        if (newTok.refresh_token) localStorage.setItem("refresh_token", newTok.refresh_token);
+        return newTok.access_token;
+    }
+
+    return token;
+}
+
+// ===================== LYRICS FUNCTIONS (FROM WORKING CODE) =====================
 function clearLyrics() {
     const old = document.querySelectorAll('.lyric-floating');
     old.forEach(el => el.remove());
 }
 
-// --- LYRIC SCATTERING ---
 function scatterLyrics() {
     clearLyrics();
 
@@ -182,60 +284,57 @@ function scatterLyrics() {
     });
 }
 
-// --- HIGHLIGHT CURRENT LYRIC ---
 function highlightLyric(currentIndex) {
     document.querySelectorAll('.lyric-floating').forEach(el => el.classList.remove('lyric-active'));
     const active = document.getElementById(`lyric-${currentIndex}`);
     if(active) active.classList.add('lyric-active');
 }
 
-// --- PARSE LRC ---
 function parseLRC(lrc) {
     const lines = lrc.split("\n");
-    const result = [];
-    
-    for (const line of lines) {
-        const timeMatches = line.matchAll(/\[(\d+):(\d+\.\d+)\]/g);
-        const text = line.replace(/\[.*?\]/g, '').trim();
-        
-        if (!text) continue;
-        
-        for (const match of timeMatches) {
-            const minutes = parseFloat(match[1]);
-            const seconds = parseFloat(match[2]);
-            const time = minutes * 60 + seconds;
-            result.push({ time, text });
-        }
-    }
-    
-    result.sort((a, b) => a.time - b.time);
-    return result;
+    return lines.map(line => {
+        const t = line.match(/\[(\d{2}):(\d{2}\.\d{2})]/);
+        if(!t) return null;
+        return {
+            time: parseInt(t[1])*60 + parseFloat(t[2]),
+            text: line.replace(/\[.*?]/g,'').trim()
+        };
+    }).filter(x => x);
 }
 
-// --- UPDATE LYRICS ---
 function updateLyrics() {
-    if(!lyrics.length || isPaused) return;
+    if(!lyrics.length) return;
     const now = (Date.now() - playbackStartTime)/1000;
     const idx = lyrics.findIndex(l => l.time > now) - 1;
     if(idx >= 0) highlightLyric(idx);
 }
 
-// --- FETCH CURRENT SONG ---
+function fetchLyrics(track, artist, album, duration){
+    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
+    fetch(url)
+    .then(r=>r.json())
+    .then(data=>{
+        if(!data.syncedLyrics) return;
+        lyrics = parseLRC(data.syncedLyrics);
+        scatterLyrics();
+    })
+    .catch(e=>console.log(e));
+}
+
+// ===================== PLAYER =====================
+async function initPlayer() {
+    token = await getValidToken();
+    setInterval(() => fetchSong(token), 1500);
+    setInterval(updateLyrics, 500);
+}
+
+initPlayer();
+
 function fetchSong(token) {
     fetch('https://api.spotify.com/v1/me/player/currently-playing', {
         headers: { 'Authorization': 'Bearer ' + token }
     })
-    .then(res => {
-        if (res.status === 204) {
-            // No content - no song playing
-            clearLyrics();
-            lastTrackId = "";
-            document.getElementById('trackName').textContent = "No track playing";
-            document.getElementById('artistName').textContent = "";
-            return null;
-        }
-        return res.json();
-    })
+    .then(res => res.json())
     .then(data => {
         if(!data || !data.item) {
             clearLyrics();
@@ -248,19 +347,18 @@ function fetchSong(token) {
         // Если трек сменился
         if(track.id !== lastTrackId) {
             lastTrackId = track.id;
-            lyrics = [];
             clearLyrics();
+            lyrics = [];
             
-            // Fetch lyrics for new track
+            document.getElementById('trackName').textContent = track.name;
+            document.getElementById('artistName').textContent = track.artists.map(a => a.name).join(', ');
+            
             fetchLyrics(track.name, track.artists[0].name, track.album.name, track.duration_ms / 1000);
         }
 
         duration = track.duration_ms / 1000;
         playbackStartTime = Date.now() - data.progress_ms;
         isPaused = !data.is_playing;
-
-        document.getElementById('trackName').textContent = track.name;
-        document.getElementById('artistName').textContent = track.artists.map(a => a.name).join(', ');
 
         const cover = track.album.images[0].url;
         if(cover !== currentAlbum) {
@@ -276,10 +374,10 @@ function fetchSong(token) {
 
         updateRotation();
     })
-    .catch(e => console.log('Error fetching song:', e));
+    .catch(e => console.log(e));
 }
 
-// --- UPDATE ROTATION ---
+// ===================== ROTATION =====================
 function updateRotation() {
     const vinyl = document.getElementById('vinyl-container');
     if(!isPaused){
@@ -289,41 +387,7 @@ function updateRotation() {
         vinyl.classList.add('paused');
     }
 }
-
-// --- FETCH LYRICS ---
-function fetchLyrics(track, artist, album, duration){
-    const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
-    
-    fetch(url)
-    .then(r => {
-        if (!r.ok) throw new Error('Lyrics not found');
-        return r.json();
-    })
-    .then(data => {
-        if(data && data.syncedLyrics) {
-            lyrics = parseLRC(data.syncedLyrics);
-            scatterLyrics();
-        } else {
-            lyrics = [];
-            clearLyrics();
-        }
-    })
-    .catch(e => {
-        console.log('Lyrics error:', e);
-        lyrics = [];
-        clearLyrics();
-    });
-}
-
-// --- INIT ---
-let token = getAccessToken();
-
-if(!token) {
-    redirectToAuth();
-} else {
-    setInterval(() => fetchSong(token), 1500);
-    setInterval(updateLyrics, 500);
-}
 </script>
+
 </body>
 </html>
