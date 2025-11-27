@@ -13,7 +13,6 @@
         background: #000;
         color: white;
         min-height: 100vh; 
-        display: flex; 
         align-items: center;
         justify-content: center;
         position: relative; 
@@ -36,7 +35,7 @@
 
     /* --- CENTERED VINYL DISC --- */
     #vinyl-container {
-        position: relative; 
+        position: relative;
         width: min(500px, 90vmin);
         height: min(500px, 90vmin);
         border-radius: 50%;
@@ -124,8 +123,9 @@
     <div id="artistName">Artist</div>
 </div>
 
-<script>const client_id = 'ca2b2a8fbe6c4adf9357b81a525ca490';
-const redirect_uri = 'https://karmirshalyan.github.io/spotifynowplaying';
+<script>
+const client_id = 'ca2b2a8fbe6c4adf9357b81a525ca490'; // Replace with your Spotify client ID
+const redirect_uri = 'https://karmirshalyan.github.io/spotifynowplaying/'; // Redirect URI after authorization
 const scopes = [
     'user-read-currently-playing',
     'user-read-playback-state',
@@ -289,9 +289,3 @@ setInterval(updateLyrics, 500);
 </script>
 </body>
 </html>
-
-
-
-
-
-
