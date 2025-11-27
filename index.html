@@ -279,14 +279,19 @@ function fetchSong(token) {
     })
     .then(res => res.json())
     .then(data => {
-        if(!data || !data.item) return;
+        if(!data || !data.item) {
+            clearLyrics();
+            lyrics = [];
+            lastTrackId = ""; 
+            return;
+        }
 
         const track = data.item;
 
         if(track.id !== lastTrackId) {
             lastTrackId = track.id;
-            clearLyrics(); 
-            lyrics = [];   
+            clearLyrics();
+            lyrics = []; 
         }
 
         duration = track.duration_ms / 1000;
@@ -442,6 +447,7 @@ setInterval(updateLyrics, 500);
 </script>
 </body>
 </html>
+
 
 
 
