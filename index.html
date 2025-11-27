@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Spotify Now Playing Redesigned</title>
+<title>Spotify Now Playing</title>
 <style>
     body {
         margin: 0;
@@ -19,7 +19,6 @@
         position: relative; 
     }
 
-    /* --- BLURRED BACKGROUND ARTWORK --- */
     #blur-bg {
         position: fixed;
         top: 0;
@@ -34,7 +33,7 @@
         transition: background-image 0.5s ease;
     }
 
-    /* --- CENTERED VINYL DISC --- */
+
     #vinyl-container {
         position: relative; 
         width: min(500px, 90vmin);
@@ -56,7 +55,7 @@
         transition: opacity 0.4s ease;
     }
 
-    /* VINYL ROTATION */
+
     @keyframes spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -69,8 +68,6 @@
     .paused {
         animation-play-state: paused;
     }
-
-    /* SONG TITLE + ARTIST BOTTOM CENTER */
     #song-info {
         position: absolute;
         bottom: 40px;
@@ -91,7 +88,6 @@
         margin-top: 4px;
     }
 
-    /* --- RANDOM LYRIC TEXT ON BACKGROUND --- */
     .lyric-floating {
         position: absolute;
         font-size: 22px;
@@ -137,7 +133,7 @@ const scopes = [
     "streaming"
 ];
 
-// --- GENERATE RANDOM STRING ---
+
 function generateRandomString(length) {
     let text = "";
     const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -147,7 +143,7 @@ function generateRandomString(length) {
     return text;
 }
 
-// --- SHA256 FOR PKCE ---
+
 async function sha256(plain) {
     const encoder = new TextEncoder();
     const data = encoder.encode(plain);
@@ -158,11 +154,9 @@ async function sha256(plain) {
         .replace(/=+$/, "");
 }
 
-// --- SAVE + LOAD CODE VERIFIER ---
 function saveVerifier(v) { localStorage.setItem("code_verifier", v); }
 function loadVerifier() { return localStorage.getItem("code_verifier"); }
 
-// --- START AUTH FLOW ---
 async function startAuth() {
     const codeVerifier = generateRandomString(64);
     saveVerifier(codeVerifier);
@@ -181,7 +175,6 @@ async function startAuth() {
     window.location = authUrl;
 }
 
-// --- EXCHANGE CODE FOR TOKEN ---
 async function requestAccessToken(code) {
     const code_verifier = loadVerifier();
 
@@ -202,7 +195,7 @@ async function requestAccessToken(code) {
     return await res.json();
 }
 
-// --- REFRESH TOKEN ---
+
 async function refreshToken(refresh_token) {
     const body = new URLSearchParams({
         client_id,
@@ -219,7 +212,7 @@ async function refreshToken(refresh_token) {
     return await res.json();
 }
 
-// --- MAIN TOKEN HANDLING ---
+
 async function handleAuth() {
     const params = new URLSearchParams(window.location.search);
 
@@ -246,7 +239,6 @@ async function getValidToken() {
 
     if (!token) return handleAuth();
 
-    // test if token expired
     const test = await fetch("https://api.spotify.com/v1/me", {
         headers: { Authorization: "Bearer " + token }
     });
@@ -272,20 +264,19 @@ async function initPlayer() {
 initPlayer();
 
 
-// --- TRACK + LYRICS ---
+
 let currentAlbum = '';
 let lyrics = [];
 let playbackStartTime = 0;
 let duration = 0;
 let isPaused = false;
 
-// --- CLEAR OLD LYRICS ---
+
 function clearLyrics() {
     const old = document.querySelectorAll('.lyric-floating');
     old.forEach(el => el.remove());
 }
 
-// --- LYRIC SCATTERING ---
 function scatterLyrics() {
     clearLyrics();
 
@@ -295,7 +286,7 @@ function scatterLyrics() {
         span.id = `lyric-${index}`;
         span.textContent = line.text;
 
-        // Расположение текста вокруг круга
+
         const screenWidth = window.innerWidth;
         const screenHeight = window.innerHeight;
         let x, y;
@@ -305,7 +296,7 @@ function scatterLyrics() {
             const dx = x - screenWidth/2;
             const dy = y - screenHeight/2;
             var distance = Math.sqrt(dx*dx + dy*dy);
-        } while(distance < 180); // Радиус круга + отступ
+        } while(distance < 180); 
 
         span.style.left = x + "px";
         span.style.top = y + "px";
@@ -313,21 +304,21 @@ function scatterLyrics() {
 
         document.body.appendChild(span);
 
-        // Плавное появление
+
         setTimeout(() => {
             span.style.opacity = 0.12;
         }, 100 * index);
     });
 }
 
-// --- HIGHLIGHT CURRENT LYRIC ---
+
 function highlightLyric(currentIndex) {
     document.querySelectorAll('.lyric-floating').forEach(el => el.classList.remove('lyric-active'));
     const active = document.getElementById(`lyric-${currentIndex}`);
     if(active) active.classList.add('lyric-active');
 }
 
-// --- PARSE LRC ---
+
 function parseLRC(lrc) {
     const lines = lrc.split("\n");
     return lines.map(line => {
@@ -340,7 +331,7 @@ function parseLRC(lrc) {
     }).filter(x => x);
 }
 
-// --- UPDATE LYRICS ---
+
 function updateLyrics() {
     if(!lyrics.length) return;
     const now = (Date.now() - playbackStartTime)/1000;
@@ -348,7 +339,7 @@ function updateLyrics() {
     if(idx >= 0) highlightLyric(idx);
 }
 
-// --- FETCH CURRENT SONG ---
+
 function fetchSong(token) {
     fetch('https://api.spotify.com/v1/me/player/currently-playing', {
         headers: { 'Authorization': 'Bearer ' + token }
@@ -368,7 +359,6 @@ function fetchSong(token) {
         const cover = track.album.images[0].url;
         if(cover !== currentAlbum) {
             currentAlbum = cover;
-            // Сброс фоновых лирик при смене песни
             clearLyrics();
             const albumImg = document.getElementById('albumImage');
             albumImg.style.opacity = 0;
@@ -384,7 +374,6 @@ function fetchSong(token) {
     })
 }
 
-// --- UPDATE ROTATION ---
 function updateRotation() {
     const vinyl = document.getElementById('vinyl-container');
     if(!isPaused){
@@ -394,8 +383,6 @@ function updateRotation() {
         vinyl.classList.add('paused');
     }
 }
-
-// --- FETCH LYRICS ---
 function fetchLyrics(track, artist, album, duration){
     const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
     fetch(url)
@@ -414,5 +401,6 @@ setInterval(updateLyrics, 500);
 </script>
 </body>
 </html>
+
 
 
