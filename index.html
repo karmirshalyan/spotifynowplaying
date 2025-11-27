@@ -273,6 +273,8 @@ let isPaused = false;
 let lastTrackId = ""; 
 
 
+let lastTrackId = "";
+
 function fetchSong(token) {
     fetch('https://api.spotify.com/v1/me/player/currently-playing', {
         headers: { 'Authorization': 'Bearer ' + token }
@@ -282,7 +284,7 @@ function fetchSong(token) {
         if(!data || !data.item) {
             clearLyrics();
             lyrics = [];
-            lastTrackId = ""; 
+            lastTrackId = "";
             return;
         }
 
@@ -314,10 +316,12 @@ function fetchSong(token) {
         }
 
         updateRotation();
+
         fetchLyrics(track.name, track.artists[0].name, track.album.name, duration);
     })
     .catch(e => console.log(e));
 }
+
 function clearLyrics() {
     const old = document.querySelectorAll('.lyric-floating');
     old.forEach(el => el.remove());
@@ -416,6 +420,7 @@ function fetchSong(token) {
         }
 
         updateRotation();
+
         fetchLyrics(track.name, track.artists[0].name, track.album.name, duration);
     })
 }
@@ -432,13 +437,19 @@ function updateRotation() {
 function fetchLyrics(track, artist, album, duration){
     const url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(artist)}&album_name=${encodeURIComponent(album)}&duration=${duration}`;
     fetch(url)
-    .then(r=>r.json())
-    .then(data=>{
-        if(!data.syncedLyrics) return;
-        lyrics = parseLRC(data.syncedLyrics);
-        scatterLyrics();
+    .then(r => r.json())
+    .then(data => {
+        lyrics = []; 
+        if(data && data.syncedLyrics) {
+            lyrics = parseLRC(data.syncedLyrics);
+        }
+        scatterLyrics(); 
     })
-    .catch(e=>console.log(e));
+    .catch(e => {
+        lyrics = [];
+        scatterLyrics(); 
+        console.log(e);
+    });
 }
 
 
@@ -447,6 +458,7 @@ setInterval(updateLyrics, 500);
 </script>
 </body>
 </html>
+
 
 
 
